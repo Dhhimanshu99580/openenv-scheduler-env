@@ -1,2 +1,4 @@
 pydantic
 openai
+pyyaml
+python-dotenv
