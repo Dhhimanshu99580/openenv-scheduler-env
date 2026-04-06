@@ -1,0 +1,152 @@
+name: dagscheduler-env
+version: 1.0.0
+description: >
+  A DAG-based job scheduling environment inspired by Apache Airflow.
+  An AI agent acts as a smart scheduler that must trigger jobs at the right time,
+  respect dependencies, handle failures, manage resources, and meet deadlines.
+author: CodeCatalysts
+license: MIT
+tags:
+  - scheduling
+  - dag
+  - airflow
+  - job-scheduling
+  - real-world
+  - openenv
+
+environment:
+  entry_point: environment.env:SchedulerEnv
+  language: python
+  python_version: "3.10"
+
+
+action_space:
+  type: discrete
+  actions:
+    - name: TRIGGER
+      description: Trigger a job now if dependencies and resources are available
+      parameters:
+        - name: job_id
+          type: string
+          required: true
+
+    - name: DELAY
+      description: Postpone a job by N time units
+      parameters:
+        - name: job_id
+          type: string
+          required: true
+        - name: delay_units
+          type: integer
+          required: true
+
+    - name: RETRY
+      description: Retry a failed job if retries are remaining
+      parameters:
+        - name: job_id
+          type: string
+          required: true
+
+    - name: CANCEL
+      description: Cancel a pending or running job
+      parameters:
+        - name: job_id
+          type: string
+          required: true
+
+    - name: REPRIORITIZE
+      description: Change the priority of a pending job
+      parameters:
+        - name: job_id
+          type: string
+          required: true
+        - name: new_priority
+          type: string
+          required: true
+          options: [HIGH, MEDIUM, LOW]
+
+    - name: WAIT
+      description: Do nothing, advance simulation time by 1 unit
+
+
+observation_space:
+  type: structured
+  fields:
+    - name: current_time
+      type: integer
+      description: Current simulated clock value
+
+    - name: jobs
+      type: list
+      description: List of all jobs and their current status
+
+    - name: available_cpu
+      type: integer
+      description: Currently available CPU units
+
+    - name: available_memory
+      type: integer
+      description: Currently available memory units
+
+    - name: execution_history
+      type: list
+      description: Log of all past actions and rewards
+
+    - name: episode_done
+      type: boolean
+      description: Whether the current episode has ended
+
+tasks:
+  - id: easy
+    name: Basic Pipeline
+    description: >
+      3 independent jobs with no dependencies.
+      Agent must trigger each job at the right schedule interval.
+    difficulty: easy
+    max_steps: 50
+    entry_point: tasks.task_easy:get_easy_task
+    grader: environment.graders:SchedulerGrader.grade_easy_task
+    scoring:
+      min: 0.0
+      max: 1.0
+
+  - id: medium
+    name: Dependent Pipeline
+    description: >
+      5 jobs in a linear pipeline with dependencies.
+      Agent must respect job ordering, handle failures,
+      and manage limited resources.
+    difficulty: medium
+    max_steps: 100
+    entry_point: tasks.task_medium:get_medium_task
+    grader: environment.graders:SchedulerGrader.grade_medium_task
+    scoring:
+      min: 0.0
+      max: 1.0
+
+  - id: hard
+    name: Production DAG Pipeline
+    description: >
+      10 jobs forming a complex DAG with multiple entry points,
+      converging pipelines, tight deadlines, limited resources,
+      and cascading failure scenarios.
+    difficulty: hard
+    max_steps: 200
+    entry_point: tasks.task_hard:get_hard_task
+    grader: environment.graders:SchedulerGrader.grade_hard_task
+    scoring:
+      min: 0.0
+      max: 1.0
+
+reward:
+  min: -1.0
+  max: 1.0
+  description: >
+    Reward is given at every step based on the action taken.
+    Positive rewards for correct scheduling decisions.
+    Negative rewards for constraint violations.
+
+
+baseline:
+  script: inference.py
+  model: meta-llama/Llama-3-8b-instruct
