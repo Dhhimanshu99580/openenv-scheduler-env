@@ -4,13 +4,11 @@ WORKDIR /app
 
 COPY . .
 
-RUN pip install --no-cache-dir \
-    pydantic \
-    openai \
-    pyyaml
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 ENV API_BASE_URL=""
 ENV MODEL_NAME=""
-ENV HF_TOKEN=""
+ENV GROQ_API_KEY=""
 
 CMD ["python", "inference.py"]
