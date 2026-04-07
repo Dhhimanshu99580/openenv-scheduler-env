@@ -46,6 +46,7 @@ def run_episode(env, max_steps=50):
         content = response.choices[0].message.content
         try:
             action_dict = json.loads(content)
+            action_dict["action_type"] = action_dict["action_type"].lower()
             action = SchedulerAction(**action_dict)
         except Exception as e:
             print(f"Error parsing LLM response: {e}")
