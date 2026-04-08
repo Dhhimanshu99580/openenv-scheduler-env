@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import httpx
 from openai import OpenAI
 from environment.env import SchedulerEnv
 from environment.models import *
@@ -17,7 +18,8 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 client = OpenAI(
     base_url=API_BASE_URL,
-    api_key=GROQ_API_KEY
+    api_key=GROQ_API_KEY,
+    http_client=httpx.Client(verify=False)
 )
 
 def run_episode(env, max_steps=50):
@@ -45,6 +47,22 @@ def run_episode(env, max_steps=50):
         ]
 
         retry_actions = [f'{{"action_type": "retry", "job_id": "{jid}"}}' for jid in failed_jobs]
+
+        # Short-circuit: no LLM call needed for deterministic cases
+        if not triggerable_jobs and not failed_jobs:
+            action = SchedulerAction(action_type=ActionType.WAIT)
+        elif not triggerable_jobs and failed_jobs:
+            action = SchedulerAction(action_type=ActionType.RETRY, job_id=failed_jobs[0])
+        else:
+            action = None  # needs LLM
+
+        if action is not None:
+            next_state, reward = env.step(action)
+            print(f"Step {step+1} | Action: {action.action_type} | Reward: {reward.score:.2f} | Reason: {reward.reason}")
+            if next_state.episode_done:
+                break
+            continue
+
         prompt = f"""
         You are a DAG job scheduler agent.
 
@@ -87,6 +105,19 @@ def run_episode(env, max_steps=50):
             print(f"Error parsing LLM response: {e}")
             print(f"LLM response was: {content}")
             break
+
+        # Validate and correct invalid LLM actions
+        if action.action_type == "trigger" and action.job_id not in triggerable_jobs:
+            if failed_jobs:
+                action = SchedulerAction(action_type="retry", job_id=failed_jobs[0])
+            else:
+                action = SchedulerAction(action_type="wait")
+        elif action.action_type == "retry" and (not hasattr(action, 'job_id') or action.job_id not in failed_jobs):
+            if triggerable_jobs:
+                action = SchedulerAction(action_type="trigger", job_id=triggerable_jobs[0])
+            else:
+                action = SchedulerAction(action_type="wait")
+
         next_state, reward = env.step(action)
         print(f"Step {step+1} | Action: {action.action_type} | Reward: {reward.score:.2f} | Reason: {reward.reason}")
         if next_state.episode_done:
