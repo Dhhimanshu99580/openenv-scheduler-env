@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from openai import OpenAI
 from environment.env import SchedulerEnv
 from environment.models import *
@@ -12,24 +13,55 @@ load_dotenv()
 
 API_BASE_URL = os.getenv("API_BASE_URL")
 MODEL_NAME   = os.getenv("MODEL_NAME")
-HF_TOKEN     = os.getenv("HF_TOKEN")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 client = OpenAI(
     base_url=API_BASE_URL,
-    api_key=HF_TOKEN
+    api_key=GROQ_API_KEY
 )
 
 def run_episode(env, max_steps=50):
     state = env.reset()
     for step in range(max_steps):
         current_state = env.current_state
+
+        last_events = current_state.execution_history[-3:] if current_state.execution_history else []
+        running_jobs = [j.job_id for j in current_state.jobs if j.status == JobStatus.RUNNING]
+        failed_jobs  = [j.job_id for j in current_state.jobs if j.status == JobStatus.FAILED]
+        urgent_jobs  = [
+            f"{j.job_id} (deadline={j.deadline}, time_left={j.deadline - current_state.current_time})"
+            for j in current_state.jobs
+            if j.status == JobStatus.PENDING and j.deadline is not None
+               and j.deadline - current_state.current_time <= 5
+        ]
+
+        job_map = {j.job_id: j for j in current_state.jobs}
+        triggerable_jobs = [
+            j.job_id for j in current_state.jobs
+            if j.status == JobStatus.PENDING
+            and j.cpu_required <= current_state.available_cpu
+            and j.memory_required <= current_state.available_memory
+            and all(job_map[d].status == JobStatus.SUCCESS for d in j.dependencies if d in job_map)
+        ]
+
+        retry_actions = [f'{{"action_type": "retry", "job_id": "{jid}"}}' for jid in failed_jobs]
         prompt = f"""
         You are a DAG job scheduler agent.
+
+        CRITICAL CONSTRAINTS — follow these exactly:
+        1. You may ONLY trigger jobs from this list: {triggerable_jobs if triggerable_jobs else "NONE — do not trigger anything"}.
+        2. If the triggerable list is NONE and there are no FAILED jobs, you MUST return {{"action_type": "wait"}}.
+        3. FAILED jobs must be retried using RETRY action (not TRIGGER). Retry these now: {retry_actions if retry_actions else "NONE"}.
+        4. Trigger ALL jobs in the triggerable list before using WAIT — maximize parallelism.
 
         Current State:
         {current_state.model_dump_json(indent=2)}
 
-        Available actions: TRIGGER, DELAY, RETRY, CANCEL, REPRIORITIZE, WAIT
+        Running jobs (waiting to complete on next WAIT): {running_jobs if running_jobs else "NONE"}
+        {"URGENT jobs near deadline: " + ", ".join(urgent_jobs) if urgent_jobs else ""}
+
+        Recent history:
+        {json.dumps(last_events, indent=2)}
 
         Return ONLY a JSON like this:
         {{"action_type": "TRIGGER", "job_id": "job_1"}}
@@ -37,7 +69,7 @@ def run_episode(env, max_steps=50):
         response = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
-                {"role": "system", "content": "You are a scheduling assistant."},
+                {"role": "system", "content": "You are a scheduling assistant. Always respond with ONLY a valid JSON object. No explanations, no markdown, no code blocks."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0
@@ -45,7 +77,10 @@ def run_episode(env, max_steps=50):
 
         content = response.choices[0].message.content
         try:
-            action_dict = json.loads(content)
+            match = re.search(r'\{.*?\}', content, re.DOTALL)
+            if not match:
+                raise ValueError("No JSON object found in response")
+            action_dict = json.loads(match.group())
             action_dict["action_type"] = action_dict["action_type"].lower()
             action = SchedulerAction(**action_dict)
         except Exception as e:

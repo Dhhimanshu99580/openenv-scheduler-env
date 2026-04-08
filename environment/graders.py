@@ -26,8 +26,9 @@ class SchedulerGrader:
             if job.status == JobStatus.FAILED:
                 retry_handling_score+= self.checkRetryHandling(state, job)
             resource_utilization_score+= self.checkResourceUtilization(state,job)
+        failed_jobs = sum(1 for job in state.jobs if job.status == JobStatus.FAILED)
         dependencyScore = dependencyScore / total_jobs if total_jobs > 0 else 0.0
-        retry_handling_score = retry_handling_score / total_jobs if total_jobs > 0 else 0.0
+        retry_handling_score = retry_handling_score / failed_jobs if failed_jobs > 0 else 1.0
         resource_utilization_score = resource_utilization_score / total_jobs if total_jobs > 0 else 0.0
         overall_score = (dependencyScore*0.4)+(retry_handling_score*0.3)+(resource_utilization_score*0.3)
         return SchedulerReward (score=overall_score, reason=f"Dependency Score: {dependencyScore:.2f}, Retry Handling Score: {retry_handling_score:.2f}, Resource Utilization Score: {resource_utilization_score:.2f}")

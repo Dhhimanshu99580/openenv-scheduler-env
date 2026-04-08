@@ -3,15 +3,18 @@ from environment.models import *
 class SchedulerEnv:
     def __init__(self, initial_state: SchedulerState):
         self.current_state = initial_state
+        self._initial_cpu = initial_state.available_cpu
+        self._initial_memory = initial_state.available_memory
+        self._initial_job_states = {job.job_id: job.status for job in initial_state.jobs}
 
     def reset(self):
         self.current_state.current_time = 0
         for job in self.current_state.jobs:
-            job.status = JobStatus.PENDING
+            job.status = self._initial_job_states[job.job_id]
             job.retry_count = 0
             job.last_run = None
-        self.current_state.available_cpu=1
-        self.current_state.available_memory=1
+        self.current_state.available_cpu = self._initial_cpu
+        self.current_state.available_memory = self._initial_memory
         self.current_state.execution_history = []
         self.current_state.episode_done = False
         return self.current_state
@@ -121,17 +124,17 @@ class SchedulerEnv:
 
     def handle_wait(self,action):
         self.current_state.current_time += 1
+        for job in self.current_state.jobs:
+            if job.status == JobStatus.RUNNING:
+                job.status = JobStatus.SUCCESS
+                self.current_state.available_cpu += job.cpu_required
+                self.current_state.available_memory += job.memory_required
         all_done = all(
             job.status in [JobStatus.SUCCESS, JobStatus.CANCELLED, JobStatus.FAILED]
             for job in self.current_state.jobs
         )
         if all_done:
             self.current_state.episode_done = True
-        for job in self.current_state.jobs:
-            if job.status == JobStatus.RUNNING:
-                job.status = JobStatus.SUCCESS
-                self.current_state.available_cpu += job.cpu_required
-                self.current_state.available_memory += job.memory_required
         return SchedulerReward(score = 0.1, reason = "Time advanced by 1 unit, running jobs completed")   
         
     

@@ -62,7 +62,7 @@ def get_medium_task():
             job_id="job_5",
             name="Send Pipeline Success Alert",
             schedule=5,
-            dependencies=["job_4"], 
+            dependencies=["job_4"],
             cpu_required=1,
             memory_required=1,
             status=JobStatus.PENDING,
@@ -72,11 +72,25 @@ def get_medium_task():
             deadline=30,
             last_run=None
         ),
+        Job(
+            job_id="job_6",
+            name="Archive Old Logs",
+            schedule=5,
+            dependencies=[],
+            cpu_required=1,
+            memory_required=1,
+            status=JobStatus.FAILED,
+            priority=Priority.LOW,
+            retry_count=0,
+            max_retries=3,
+            deadline=35,
+            last_run=None
+        ),
     ]
     return SchedulerState(
         current_time=0,
         jobs=jobs,
-        available_cpu=4,       
+        available_cpu=4,
         available_memory=4,
         execution_history=[]
     )
