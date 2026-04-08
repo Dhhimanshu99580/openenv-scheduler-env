@@ -1,3 +1,12 @@
+---
+title: DAGScheduler-Env
+emoji: 🗓️
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+---
+
 # DAGScheduler-Env
 
 An OpenEnv-compliant reinforcement learning environment that simulates a real-world **DAG-based job scheduler** — inspired by tools like Apache Airflow. An AI agent acts as a smart scheduler that must decide when to trigger jobs, handle failures, manage dependencies, and optimize resource usage.

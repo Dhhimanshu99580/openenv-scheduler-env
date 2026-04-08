@@ -12,18 +12,37 @@ from environment.graders import SchedulerGrader
 from dotenv import load_dotenv
 load_dotenv() 
 
-API_BASE_URL = os.getenv("API_BASE_URL")
-MODEL_NAME   = os.getenv("MODEL_NAME")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+API_BASE_URL = os.getenv("API_BASE_URL", "https://api.groq.com/openai/v1")
+MODEL_NAME   = os.getenv("MODEL_NAME", "llama-3.1-8b-instant")
+HF_TOKEN     = os.getenv("HF_TOKEN")
 
 client = OpenAI(
     base_url=API_BASE_URL,
-    api_key=GROQ_API_KEY,
+    api_key=HF_TOKEN,
     http_client=httpx.Client(verify=False)
 )
 
-def run_episode(env, max_steps=50):
-    state = env.reset()
+def log_start(task: str, model: str) -> None:
+    print(f"[START] task={task} env=openenv-scheduler model={model}", flush=True)
+
+def log_step(step: int, action: str, reward: float, done: bool, error) -> None:
+    error_val = error if error else "null"
+    print(f"[STEP] step={step} action={action} reward={reward:.2f} done={str(done).lower()} error={error_val}", flush=True)
+
+def log_end(success: bool, steps: int, score: float, rewards: list) -> None:
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    print(f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}", flush=True)
+
+def action_str(action: SchedulerAction) -> str:
+    if action.action_type in (ActionType.TRIGGER, ActionType.RETRY):
+        return f"{action.action_type.value}({action.job_id})"
+    return action.action_type.value
+
+def run_episode(env, task_name: str, max_steps=50):
+    env.reset()
+    log_start(task=task_name, model=MODEL_NAME)
+    rewards = []
+    steps_taken = 0
     for step in range(max_steps):
         current_state = env.current_state
 
@@ -53,11 +72,13 @@ def run_episode(env, max_steps=50):
         elif not triggerable_jobs and failed_jobs:
             action = SchedulerAction(action_type=ActionType.RETRY, job_id=failed_jobs[0])
         else:
-            action = None  # needs LLM
+            action = None 
 
         if action is not None:
             next_state, reward = env.step(action)
-            print(f"Step {step+1} | Action: {action.action_type} | Reward: {reward.score:.2f} | Reason: {reward.reason}")
+            steps_taken += 1
+            rewards.append(reward.score)
+            log_step(steps_taken, action_str(action), reward.score, next_state.episode_done, None)
             if next_state.episode_done:
                 break
             continue
@@ -101,8 +122,9 @@ def run_episode(env, max_steps=50):
             action_dict["action_type"] = action_dict["action_type"].lower()
             action = SchedulerAction(**action_dict)
         except Exception as e:
-            print(f"Error parsing LLM response: {e}")
-            print(f"LLM response was: {content}")
+            steps_taken += 1
+            rewards.append(0.0)
+            log_step(steps_taken, "parse_error", 0.0, False, str(e))
             break
 
         if action.action_type == "trigger" and action.job_id not in triggerable_jobs:
@@ -117,20 +139,23 @@ def run_episode(env, max_steps=50):
                 action = SchedulerAction(action_type="wait")
 
         next_state, reward = env.step(action)
-        print(f"Step {step+1} | Action: {action.action_type} | Reward: {reward.score:.2f} | Reason: {reward.reason}")
+        steps_taken += 1
+        rewards.append(reward.score)
+        log_step(steps_taken, action_str(action), reward.score, next_state.episode_done, None)
         if next_state.episode_done:
             break
-    return env
+    return rewards, steps_taken
 
 if __name__ == "__main__":
     grader = SchedulerGrader()
-    
-    for task_name, get_task, grade_fn in [
-        ("easy",   get_easy_task,   grader.grade_easy_task),
-        ("medium", get_medium_task, grader.grade_medium_task),
-        ("hard",   get_hard_task,   grader.grade_hard_task),
+
+    for task_name, get_task, grade_fn, max_steps in [
+        ("easy",   get_easy_task,   grader.grade_easy_task,   50),
+        ("medium", get_medium_task, grader.grade_medium_task, 100),
+        ("hard",   get_hard_task,   grader.grade_hard_task,   200),
     ]:
         env = SchedulerEnv(get_task())
-        run_episode(env)
-        score = grade_fn(env.current_state) 
-        print(f"Task: {task_name} | Score: {score.score:.2f} | Reason: {score.reason}")
+        rewards, steps_taken = run_episode(env, task_name=task_name, max_steps=max_steps)
+        grade = grade_fn(env.current_state)
+        score = max(0.0, min(1.0, grade.score))
+        log_end(success=score > 0.0, steps=steps_taken, score=score, rewards=rewards)

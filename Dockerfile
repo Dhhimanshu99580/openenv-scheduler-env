@@ -9,6 +9,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 ENV API_BASE_URL=""
 ENV MODEL_NAME=""
-ENV GROQ_API_KEY=""
+ENV HF_TOKEN=""
 
-CMD ["python", "inference.py"]
+EXPOSE 7860
+
+CMD ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "7860"]
