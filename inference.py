@@ -48,7 +48,6 @@ def run_episode(env, max_steps=50):
 
         retry_actions = [f'{{"action_type": "retry", "job_id": "{jid}"}}' for jid in failed_jobs]
 
-        # Short-circuit: no LLM call needed for deterministic cases
         if not triggerable_jobs and not failed_jobs:
             action = SchedulerAction(action_type=ActionType.WAIT)
         elif not triggerable_jobs and failed_jobs:
@@ -106,7 +105,6 @@ def run_episode(env, max_steps=50):
             print(f"LLM response was: {content}")
             break
 
-        # Validate and correct invalid LLM actions
         if action.action_type == "trigger" and action.job_id not in triggerable_jobs:
             if failed_jobs:
                 action = SchedulerAction(action_type="retry", job_id=failed_jobs[0])
