@@ -104,17 +104,16 @@ def run_episode(env, task_name: str, max_steps=50):
         Return ONLY a JSON like this:
         {{"action_type": "TRIGGER", "job_id": "job_1"}}
         """
-        response = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[
-                {"role": "system", "content": "You are a scheduling assistant. Always respond with ONLY a valid JSON object. No explanations, no markdown, no code blocks."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0
-        )
-
-        content = response.choices[0].message.content
         try:
+            response = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=[
+                    {"role": "system", "content": "You are a scheduling assistant. Always respond with ONLY a valid JSON object. No explanations, no markdown, no code blocks."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0
+            )
+            content = response.choices[0].message.content
             match = re.search(r'\{.*?\}', content, re.DOTALL)
             if not match:
                 raise ValueError("No JSON object found in response")
@@ -122,10 +121,12 @@ def run_episode(env, task_name: str, max_steps=50):
             action_dict["action_type"] = action_dict["action_type"].lower()
             action = SchedulerAction(**action_dict)
         except Exception as e:
-            steps_taken += 1
-            rewards.append(0.0)
-            log_step(steps_taken, "parse_error", 0.0, False, str(e))
-            break
+            # Fallback: trigger the first available job, or wait
+            print(f"[WARN] LLM call failed ({e}), using heuristic fallback", flush=True)
+            if triggerable_jobs:
+                action = SchedulerAction(action_type=ActionType.TRIGGER, job_id=triggerable_jobs[0])
+            else:
+                action = SchedulerAction(action_type=ActionType.WAIT)
 
         if action.action_type == "trigger" and action.job_id not in triggerable_jobs:
             if failed_jobs:
