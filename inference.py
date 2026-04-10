@@ -12,15 +12,16 @@ from environment.graders import SchedulerGrader
 from dotenv import load_dotenv
 load_dotenv() 
 
-API_BASE_URL = os.getenv("API_BASE_URL", "https://api.groq.com/openai/v1")
-MODEL_NAME   = os.getenv("MODEL_NAME", "llama-3.1-8b-instant")
-HF_TOKEN     = os.getenv("HF_TOKEN")
+API_BASE_URL = os.getenv("API_BASE_URL") or "https://api.groq.com/openai/v1"
+MODEL_NAME   = os.getenv("MODEL_NAME") or "llama-3.1-8b-instant"
+HF_TOKEN     = os.getenv("HF_TOKEN") or ""
 
+USE_LLM = bool(API_BASE_URL and HF_TOKEN)
 client = OpenAI(
     base_url=API_BASE_URL,
-    api_key=HF_TOKEN,
+    api_key=HF_TOKEN or "placeholder",
     http_client=httpx.Client(verify=False)
-)
+) if USE_LLM else None
 
 def log_start(task: str, model: str) -> None:
     print(f"[START] task={task} env=openenv-scheduler model={model}", flush=True)
@@ -104,29 +105,28 @@ def run_episode(env, task_name: str, max_steps=50):
         Return ONLY a JSON like this:
         {{"action_type": "TRIGGER", "job_id": "job_1"}}
         """
-        try:
-            response = client.chat.completions.create(
-                model=MODEL_NAME,
-                messages=[
-                    {"role": "system", "content": "You are a scheduling assistant. Always respond with ONLY a valid JSON object. No explanations, no markdown, no code blocks."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0
-            )
-            content = response.choices[0].message.content
-            match = re.search(r'\{.*?\}', content, re.DOTALL)
-            if not match:
-                raise ValueError("No JSON object found in response")
-            action_dict = json.loads(match.group())
-            action_dict["action_type"] = action_dict["action_type"].lower()
-            action = SchedulerAction(**action_dict)
-        except Exception as e:
-            # Fallback: trigger the first available job, or wait
-            print(f"[WARN] LLM call failed ({e}), using heuristic fallback", flush=True)
-            if triggerable_jobs:
+        if not USE_LLM:
+            action = SchedulerAction(action_type=ActionType.TRIGGER, job_id=triggerable_jobs[0])
+        else:
+            try:
+                response = client.chat.completions.create(
+                    model=MODEL_NAME,
+                    messages=[
+                        {"role": "system", "content": "You are a scheduling assistant. Always respond with ONLY a valid JSON object. No explanations, no markdown, no code blocks."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0
+                )
+                content = response.choices[0].message.content
+                match = re.search(r'\{.*?\}', content, re.DOTALL)
+                if not match:
+                    raise ValueError("No JSON object found in response")
+                action_dict = json.loads(match.group())
+                action_dict["action_type"] = action_dict["action_type"].lower()
+                action = SchedulerAction(**action_dict)
+            except Exception as e:
+                print(f"[WARN] LLM call failed ({e}), using heuristic fallback", flush=True)
                 action = SchedulerAction(action_type=ActionType.TRIGGER, job_id=triggerable_jobs[0])
-            else:
-                action = SchedulerAction(action_type=ActionType.WAIT)
 
         if action.action_type == "trigger" and action.job_id not in triggerable_jobs:
             if failed_jobs:

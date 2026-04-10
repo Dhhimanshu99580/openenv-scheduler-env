@@ -7,8 +7,8 @@ COPY . .
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-ENV API_BASE_URL=""
-ENV MODEL_NAME=""
+ENV API_BASE_URL="https://api.groq.com/openai/v1"
+ENV MODEL_NAME="llama-3.1-8b-instant"
 ENV HF_TOKEN=""
 
 EXPOSE 7860
